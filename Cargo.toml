@@ -1,0 +1,10 @@
+[package]
+name = "rust_shoal"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+minifb = "0.27.0"
+rand = "0.8.5"
+rand_distr = "0.4.3"
+uuid = { version = "1.11.0", features = [ "serde", "v4"] }
