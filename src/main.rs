@@ -2,6 +2,7 @@ mod fish;
 mod grid;
 mod shoal;
 mod vector;
+mod wrench;
 
 use grid::Grid;
 use shoal::Shoal;
@@ -18,6 +19,7 @@ const ATTRACTION_DISTANCE: f64 = 100.0;
 const VISIBILITY_DISTANCE: f64 = 200.0;
 
 const REPULSION_FORCE_FACTOR: f64 = 1e4;
+const TORQUE_FACTOR: f64 = 1e0;
 const ATTRACTION_FORCE_FACTOR: f64 = 1e1;
 
 const BACKGROUND_COLOR: u32 = 0x000000;

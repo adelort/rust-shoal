@@ -2,8 +2,8 @@ use rand::{distributions::Uniform, prelude::Distribution, thread_rng};
 use uuid::Uuid;
 
 use crate::{
-    grid::Grid, vector::Vector, ATTRACTION_DISTANCE, ATTRACTION_FORCE_FACTOR, HEIGHT,
-    REPULSION_DISTANCE, REPULSION_FORCE_FACTOR, VISIBILITY_DISTANCE, WIDTH,
+    grid::Grid, vector::Vector, wrench::Wrench, ATTRACTION_DISTANCE, ATTRACTION_FORCE_FACTOR,
+    HEIGHT, REPULSION_DISTANCE, REPULSION_FORCE_FACTOR, TORQUE_FACTOR, VISIBILITY_DISTANCE, WIDTH,
 };
 
 #[derive(Clone)]
@@ -17,6 +17,8 @@ pub struct Fish {
     id: Uuid,
     pub position: Vector,
     velocity: Vector,
+    theta: f64,
+    theta_dot: f64,
     t: f64,
     kind: FishKind,
 }
@@ -35,16 +37,14 @@ impl Fish {
                 y: initial_y as f64,
             },
             velocity: Vector { x: 0., y: 0. },
+            theta: 0.,
+            theta_dot: 0.,
             t: 0.,
             kind: fish_kind,
         }
     }
 
-    fn alpha(&self) -> f64 {
-        self.velocity.y.atan2(self.velocity.x)
-    }
-
-    pub fn compute_attraction(&self, other_fish: &Fish) -> Vector {
+    pub fn compute_wrench(&self, other_fish: &Fish) -> Wrench {
         let delta_x = self.position.x - other_fish.position.x;
         let delta_y = self.position.y - other_fish.position.y;
 
@@ -53,7 +53,10 @@ impl Fish {
         let angle = delta_y.atan2(delta_x);
 
         if distance > VISIBILITY_DISTANCE {
-            return Vector { x: 0., y: 0. };
+            return Wrench {
+                force: Vector { x: 0., y: 0. },
+                torque: TORQUE_FACTOR,
+            };
         } else if distance > ATTRACTION_DISTANCE {
             let normalized_distance =
                 (distance - ATTRACTION_DISTANCE) / (VISIBILITY_DISTANCE - ATTRACTION_DISTANCE);
@@ -62,27 +65,38 @@ impl Fish {
                 * 64.
                 * normalized_distance.powi(3)
                 * (1. - normalized_distance.powi(3));
-
-            return Vector {
-                x: angle.cos(),
-                y: angle.sin(),
-            } * norm
-                * -1.;
+            return Wrench {
+                force: Vector {
+                    x: angle.cos(),
+                    y: angle.sin(),
+                } * norm
+                    * -1.,
+                torque: TORQUE_FACTOR,
+            };
         } else if distance > REPULSION_DISTANCE {
-            return Vector { x: 0., y: 0. };
+            return Wrench {
+                force: Vector { x: 0., y: 0. },
+                torque: TORQUE_FACTOR, //TODO
+            };
         } else if distance < 1e-10 {
             // Prevents errors when the distance is too small
-            return Vector { x: 0., y: 0. };
+            return Wrench {
+                force: Vector { x: 0., y: 0. },
+                torque: 0.,
+            };
         } else {
             let normalized_distance = distance / REPULSION_DISTANCE;
 
             let norm = REPULSION_FORCE_FACTOR * 2. * (1. - normalized_distance).powi(2)
                 / normalized_distance;
 
-            return Vector {
-                x: angle.cos(),
-                y: angle.sin(),
-            } * norm;
+            return Wrench {
+                force: Vector {
+                    x: angle.cos(),
+                    y: angle.sin(),
+                } * norm,
+                torque: TORQUE_FACTOR,
+            };
         }
     }
 
@@ -90,16 +104,18 @@ impl Fish {
         let dt = t - self.t;
 
         //TODO: if predator, random path or goes toward close fishes
-        let dv = (all_fishes
+        let Wrench { force, torque } = all_fishes
             .iter()
             .filter(|fish| fish.id != self.id)
-            .map(|fish| self.compute_attraction(fish))
-            .sum::<Vector>())
-            * (dt / all_fishes.len() as f64);
-
-        self.velocity += dv;
+            .map(|fish| self.compute_wrench(fish))
+            .sum::<Wrench>()
+            / all_fishes.len() as f64;
 
         self.position += self.velocity.clone() * dt;
+        self.theta += self.theta_dot * dt;
+
+        self.velocity += force * dt;
+        self.theta_dot += torque * dt;
 
         self.t = t;
     }
@@ -124,8 +140,8 @@ impl Fish {
         grid.draw_line(
             self.position.x,
             self.position.y,
-            self.position.x - tail_length * self.alpha().cos(),
-            self.position.y - tail_length * self.alpha().sin(),
+            self.position.x - tail_length * self.theta.cos(),
+            self.position.y - tail_length * self.theta.sin(),
             color,
         );
     }
