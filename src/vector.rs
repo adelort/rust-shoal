@@ -1,6 +1,6 @@
 use std::{
     iter::Sum,
-    ops::{Add, AddAssign, Mul},
+    ops::{Add, AddAssign, Mul, Sub},
 };
 
 #[derive(Clone)]
@@ -30,6 +30,17 @@ impl AddAssign for Vector {
 impl Sum for Vector {
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
         iter.fold(Vector { x: 0.0, y: 0.0 }, |acc, v| acc + v)
+    }
+}
+
+impl Sub for Vector {
+    type Output = Self;
+
+    fn sub(self, vector: Vector) -> Self::Output {
+        Vector {
+            x: self.x - vector.x,
+            y: self.y - vector.y,
+        }
     }
 }
 

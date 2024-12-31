@@ -2,11 +2,12 @@ use rand::{distributions::Uniform, prelude::Distribution, thread_rng};
 use uuid::Uuid;
 
 use crate::{
-    grid::Grid, vector::Vector, ATTRACTION_DISTANCE, ATTRACTION_FORCE_FACTOR, HEIGHT,
-    REPULSION_DISTANCE, REPULSION_FORCE_FACTOR, VISIBILITY_DISTANCE, WIDTH,
+    grid::Grid, vector::Vector, ALIGNMENT_FORCE_FACTOR, ATTRACTION_FORCE_FACTOR, HEIGHT,
+    PREDATOR_ATTRACTION_FACTOR, PREDATOR_REPULSION_FACTOR, REPULSION_FORCE_FACTOR,
+    VISIBILITY_DISTANCE, WIDTH,
 };
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub enum FishKind {
     SchoolFish,
     Predator,
@@ -34,7 +35,7 @@ impl Fish {
                 x: initial_x as f64,
                 y: initial_y as f64,
             },
-            velocity: Vector { x: 0., y: 0. },
+            velocity: Vector { x: 100., y: 0. },
             t: 0.,
             kind: fish_kind,
         }
@@ -45,61 +46,103 @@ impl Fish {
     }
 
     pub fn compute_attraction(&self, other_fish: &Fish) -> Vector {
-        let delta_x = self.position.x - other_fish.position.x;
-        let delta_y = self.position.y - other_fish.position.y;
+        let delta_x = other_fish.position.x - self.position.x;
+        let delta_y = other_fish.position.y - self.position.y;
 
         let distance: f64 = (delta_x * delta_x + delta_y * delta_y).sqrt();
 
-        let angle = delta_y.atan2(delta_x);
-
-        if distance > VISIBILITY_DISTANCE {
-            return Vector { x: 0., y: 0. };
-        } else if distance > ATTRACTION_DISTANCE {
-            let normalized_distance =
-                (distance - ATTRACTION_DISTANCE) / (VISIBILITY_DISTANCE - ATTRACTION_DISTANCE);
-
-            let norm = ATTRACTION_FORCE_FACTOR
-                * 64.
-                * normalized_distance.powi(3)
-                * (1. - normalized_distance.powi(3));
-
-            return Vector {
-                x: angle.cos(),
-                y: angle.sin(),
-            } * norm
-                * -1.;
-        } else if distance > REPULSION_DISTANCE {
-            return Vector { x: 0., y: 0. };
-        } else if distance < 1e-10 {
+        if distance > VISIBILITY_DISTANCE || distance < 1e-10 {
             // Prevents errors when the distance is too small
             return Vector { x: 0., y: 0. };
-        } else {
-            let normalized_distance = distance / REPULSION_DISTANCE;
-
-            let norm = REPULSION_FORCE_FACTOR * 2. * (1. - normalized_distance).powi(2)
-                / normalized_distance;
-
-            return Vector {
-                x: angle.cos(),
-                y: angle.sin(),
-            } * norm;
         }
+
+        let attraction_force = Vector {
+            x: delta_x / distance,
+            y: delta_y / distance,
+        } * ATTRACTION_FORCE_FACTOR
+            * distance;
+
+        let alignment_force =
+            (other_fish.velocity.clone() - self.velocity.clone()) * ALIGNMENT_FORCE_FACTOR;
+
+        let repulsion_force = Vector {
+            x: delta_x / distance,
+            y: delta_y / distance,
+        } * (-REPULSION_FORCE_FACTOR / distance);
+
+        attraction_force + alignment_force + repulsion_force
+    }
+
+    pub fn compute_predator_repulsion(&self, predator: &Fish) -> Vector {
+        let delta_x = predator.position.x - self.position.x;
+        let delta_y = predator.position.y - self.position.y;
+
+        let distance: f64 = (delta_x * delta_x + delta_y * delta_y).sqrt();
+
+        Vector {
+            x: delta_x / distance,
+            y: delta_y / distance,
+        } * (-PREDATOR_REPULSION_FACTOR / distance / distance)
     }
 
     pub fn swim(&mut self, t: f64, all_fishes: &Vec<Fish>) {
         let dt = t - self.t;
 
-        //TODO: if predator, random path or goes toward close fishes
-        let dv = (all_fishes
+        let school_fishes: Vec<&Fish> = all_fishes
             .iter()
-            .filter(|fish| fish.id != self.id)
-            .map(|fish| self.compute_attraction(fish))
-            .sum::<Vector>())
-            * (dt / all_fishes.len() as f64);
+            .filter(|fish| fish.kind == FishKind::SchoolFish)
+            .collect();
 
-        self.velocity += dv;
+        let predators: Vec<&Fish> = all_fishes
+            .iter()
+            .filter(|fish| fish.kind == FishKind::Predator)
+            .collect();
+
+        let school_fish_count = school_fishes.len();
+
+        let predator_count = predators.len();
+
+        let acceleration = match self.kind {
+            FishKind::Predator => {
+                ((school_fishes
+                    .iter()
+                    .map(|fish| fish.position.clone())
+                    .sum::<Vector>()
+                    * (1. / school_fish_count as f64))
+                    - self.position.clone())
+                    * PREDATOR_ATTRACTION_FACTOR
+            }
+            FishKind::SchoolFish => {
+                let predator_repulsion = match predator_count {
+                    0 => Vector { x: 0., y: 0. },
+                    _ => {
+                        predators
+                            .iter()
+                            .map(|predator| self.compute_predator_repulsion(predator))
+                            .sum::<Vector>()
+                            * (1. / predator_count as f64)
+                    }
+                };
+
+                let other_fishes_interation = match school_fish_count {
+                    0 => Vector { x: 0., y: 0. },
+                    _ => {
+                        school_fishes
+                            .iter()
+                            .filter(|fish| fish.id != self.id)
+                            .map(|fish| self.compute_attraction(fish))
+                            .sum::<Vector>()
+                            * (1. / school_fish_count as f64)
+                    }
+                };
+
+                predator_repulsion + other_fishes_interation
+            }
+        };
 
         self.position += self.velocity.clone() * dt;
+
+        self.velocity += acceleration * dt;
 
         self.t = t;
     }
